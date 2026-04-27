@@ -78,4 +78,13 @@ Cluster quality is evaluated using:
 
 ---
 
-## Project Structure
+
+## Conclusion
+
+This study demonstrates that Incheon Airport’s competitiveness lies in balancing transfer and direct demand rather than relying on a single hub model. The results provide insights for improving network efficiency and strategic positioning.
+
+---
+
+## Author
+
+LUBOWEN
