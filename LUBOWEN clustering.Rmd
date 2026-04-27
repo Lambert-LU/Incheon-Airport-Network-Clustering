@@ -1,0 +1,433 @@
+---
+title: "LUBOWEN Clustering"
+output: html_document
+date: "2026-02-01"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(cluster)
+library(factoextra)
+library(tidyverse)
+library(factoextra)
+library(flexclust)
+library(fpc)
+library(clustertend)
+library(cluster)
+library(ClusterR)
+library("fpc")
+library("dbscan")
+library("factoextra")
+library(dplyr)
+library(tidyr)
+```
+
+## Source
+This dataset is provided by the Incheon International Airport Corporation and is used to retrieve the latest departure and arrival information for passenger flights, covering approximately 3–6 days prior to the query date. Search conditions can be based on scheduled or updated times, and queries may be filtered by airport code, flight number (UNIQ code or three-digit flight number), IATA airport code, and language. The returned data include airline information, airport name and code, scheduled and updated times, codeshare details, flight number and master flight number, boarding gate, terminal type, flight status, and aircraft operation type.
+```{r}
+airport_data <- read.csv("C:/Users/13640/Desktop/incheon airport.csv", header = TRUE, sep = ",", stringsAsFactors = FALSE)
+head(airport_data)
+airport_clean<-airport_data %>%drop_na()
+head(airport_clean)
+```
+
+## Research Objectives
+
+Incheon International Airport has long positioned itself as a leading air transit hub in Northeast Asia, aiming to strengthen its competitiveness in the global aviation network. Beyond expanding its route network, the airport’s competitive edge increasingly depends on its ability to optimize transfer efficiency, structure its route portfolio strategically, and capture regional passenger flows.
+
+In this context, this study aims to deliver a **data-driven, strategic analysis** of Incheon Airport’s route network and passenger flow structure, with a focus on identifying how different markets contribute to its role as a transfer hub.
+
+Specifically, using route- and region-level aviation data, the study applies clustering techniques to segment markets based on passenger flow characteristics. The analysis identifies three key market types:
+
+1. **Mature direct markets**, driven primarily by point-to-point demand  
+2. **Transfer-dependent markets**, where Incheon functions as a critical hub node  
+3. **Emerging markets with untapped transfer potential**, offering opportunities for future growth  
+
+This segmentation provides a clearer understanding of how different markets contribute to Incheon Airport’s network performance and highlights variations in transfer reliance across regions.
+
+Furthermore, the study evaluates the **geographical and structural suitability of different regions as transfer sources**, considering factors such as location, network connectivity, and regulatory conditions. This enables the identification of high-potential markets where targeted development strategies could enhance transfer traffic.
+
+From a managerial perspective, the findings support **evidence-based decision-making** in key areas, including:
+
+- Route network optimization  
+- Flight scheduling and connectivity design  
+- Transfer product development  
+- Strategic airline partnerships  
+
+Ultimately, this study aims to provide **actionable insights** into how Incheon Airport can strengthen its position as a global hub, improve network efficiency, and develop differentiated strategies in an increasingly competitive international aviation market.
+
+### Variable Design and Business Interpretation
+
+The clustering analysis is based on two key dimensions:
+
+- **Transfer rate**: captures the extent to which a route functions as a transfer corridor rather than a point-to-point market  
+- **Total passenger volume**: reflects market size and demand intensity  
+
+Together, these variables allow us to distinguish between routes driven by scale (direct demand) and those driven by network connectivity (transfer demand).
+
+## Data Cleaning
+
+To enhance analytical usability, key variables were reconstructed through aggregation and derived metrics. For instance, total passenger volume was calculated by combining free and paid passengers, and average passengers per flight was derived from total passengers and flight counts.
+
+To ensure data consistency and computational efficiency, observations with missing values were removed.
+```{r}
+airport_clean <- airport_clean %>%
+  mutate(sum_passenger = Farepaying_passenger+Free_passenger)
+head(airport_clean$sum_passenger)
+airport_clean <- airport_clean %>%
+  mutate(passenger_per_flight = round(sum_passenger/Flight))
+head(airport_clean$passenger_per_flight)
+airport_clean <- airport_clean %>%
+  mutate(passenger_transfer_rate = Transfer_passenger/sum_passenger)
+airport_clean <- airport_clean %>%
+  dplyr::filter(!is.na(Flight), Flight > 0)
+head(airport_clean$passenger_transfer_rate)
+airport_clean <- airport_clean %>%
+  mutate(passenger_direct = (sum_passenger-Transfer_passenger)/Flight)
+head(airport_clean$passenger_direct)
+airport_clean <- airport_clean %>%
+  mutate(passenger_transfer = Transfer_passenger/Flight)
+head(airport_clean$passenger_transfer)
+head(airport_clean$cargo_per_flight )
+airport_clu <- data.frame(
+  transfer = airport_clean$passenger_transfer_rate,
+  sum   = airport_clean$sum_passenger
+)
+airport_clustering<-airport_clu %>%drop_na()
+```
+
+# Comparing different methods of clustering
+## Kmeans
+First, we applied the K-means clustering method. An elbow plot was used to determine the optimal number of clusters. A clear elbow is observed at K = 2, suggesting this as a suitable choice. We further validated this selection using silhouette analysis.
+
+```{r echo=TRUE}
+fviz_nbclust(
+  airport_clustering,
+  FUNcluster = kmeans,
+  method = "wss",
+  k.max = 10
+) +
+  theme_classic() +
+  labs(title = "Elbow Method for Choosing k")
+```
+Based on the silhouette analysis, the clustering performance is optimal when K = 2. Therefore, we adopt a two-cluster solution for the subsequent analysis.
+```{r echo=TRUE}
+fviz_nbclust(
+  airport_clustering,
+  FUNcluster = kmeans,
+  method = "silhouette",
+  k.max = 10
+) +
+  theme_classic() +
+  labs(title = "Silhouette Method for Choosing k")
+```
+### Kmeans Clustering Result
+Based on the clustering results, two distinct types of routes can be identified. Cluster 1 is characterized by a high total number of passengers and a relatively low transfer rate, while Cluster 2 exhibits a lower total passenger volume but a higher transfer rate.
+
+These two patterns are well aligned with established commercial logic in the aviation industry. On popular routes, a large volume of point-to-point passengers naturally dilutes the proportion of transfer passengers. In contrast, on less popular routes, airlines tend to encourage transfer traffic in order to improve load factors and make better use of available capacity. From a business perspective, both clusters therefore reflect economically rational and internally consistent operational strategies.
+```{r}
+airport_clusters <- kmeans(
+  airport_clustering,
+  centers =2,
+  nstart = 25
+)
+airport_clusters$size
+airport_clusters$centers
+```
+Based on the clustering visualization, we observe that some regions exhibit non-convex (concave) shapes, indicating that there is room for improvement in clustering performance. However, since the analysis is restricted to two clusters, the simplified clustering structure helps mitigate the well-known limitation of K-means in handling complex cluster shapes. As a result, despite this geometric constraint, the two-cluster solution remains reasonable and effective for the purposes of this analysis.
+```{r echo=TRUE}
+fviz_cluster(
+  airport_clusters,
+  data = airport_clustering,
+  geom = "point",
+  ellipse.type = "norm"
+) +
+  theme_classic()
+```
+### K-means Clustering Quality
+Based on the silhouette analysis, the overall average silhouette coefficient is 0.73, indicating that the clustering results exhibit good quality and a clear cluster structure.
+
+Examining the internal structure of each cluster, most observations have positive silhouette values concentrated in relatively high ranges, suggesting strong within-cluster similarity and good separation from other clusters. In particular, Cluster 2 shows generally higher and more stable silhouette values, indicating a compact internal structure with well-defined boundaries. In contrast, Cluster 1 has relatively lower silhouette values, but the majority remain positive, implying that its clustering assignment is still reasonable overall.
+
+Taken together, the K-means clustering performs robustly on this dataset and effectively distinguishes different route types, providing a reliable basis for subsequent analysis.
+```{r}
+sil<-silhouette(airport_clusters$cluster, dist(airport_clustering))
+fviz_silhouette(sil)
+```
+## PAM
+Consistent with the K-means results, it is also necessary to determine the optimal number of clusters for the PAM method. Based on silhouette analysis, K = 2 is again identified as the optimal number of clusters for PAM, indicating strong agreement between the two clustering approaches.
+```{r echo=TRUE}
+fviz_nbclust(
+  airport_clustering,
+  FUNcluster = pam,
+  method = "silhouette",
+  k.max = 5
+) +
+  theme_classic() +
+  labs(title = "Silhouette Method for Choosing k (PAM)")
+```
+### PAM Clustering Result
+Based on the clustering results, two main route types can be identified: Cluster 1, characterized by a high total number of passengers and a low transfer rate, and Cluster 2, characterized by a lower passenger volume but a higher transfer rate. These findings are consistent with the K-means results and align well with established commercial logic in the aviation industry.
+```{r}
+P1<-pam(airport_clustering,2)
+P1$medoids
+plot(P1)
+```
+Based on the visualization, the overall clustering quality is high and consistent with the K-means results; however, limitations in identifying concave-shaped cluster structures remain.
+```{r}
+fviz_cluster(P1, geom = "point", ellipse.type = "norm") 
+```
+### PAM Clustering Quality
+Based on the silhouette analysis, the overall average silhouette coefficient is 0.72, indicating that the clustering solution achieves a good balance between within-cluster similarity and between-cluster separation. The overall cluster structure is relatively clear, with no evidence of large-scale misclassification. Most observations have positive silhouette values, suggesting that they are reasonably assigned to their respective clusters.
+
+Although the average silhouette score is slightly lower than that obtained from the K-means clustering, this method demonstrates superior stability and robustness in the presence of data dispersion and structural heterogeneity. Compared with clustering approaches that are more sensitive to initial conditions and extreme values, this method is able to maintain good clustering quality while producing more consistent and reliable classifications. Therefore, when both clustering performance and result reliability are taken into account, this clustering solution offers higher practical value.
+```{r}
+fviz_silhouette(P1)
+```
+## Hierachy
+Based on hierarchical clustering, we first partitioned the data into two clusters. The resulting average silhouette coefficient is 0.73, indicating high clustering quality and a level of performance comparable to that of the K-means solution.
+
+However, a small number of observations exhibit silhouette values close to zero, and some even show slightly negative values. This suggests that these observations lie near the boundary between clusters, where the distinction between neighboring clusters is not particularly clear.
+
+Given this issue, we ultimately prefer the K-means clustering, which does not produce negative silhouette values and therefore provides a more clearly separated and interpretable clustering structure.
+```{r}
+d <- dist(airport_clustering, method = "euclidean")
+hc <- hclust(d, method = "ward.D2")
+hc_k2 <- cutree(hc, k = 2)
+plot(hc, labels = FALSE, hang = -1)
+rect.hclust(hc, k = 2, border = c("red", "blue"))
+```
+
+```{r}
+sil_hc2 <- silhouette(hc_k2, d)
+mean(sil_hc2[, 3])
+fviz_silhouette(sil_hc2)
+```
+We further explored a clustering solution with three clusters, but the results show a clear decline in the average silhouette coefficient, indicating a deterioration in clustering quality and structural clarity. Moreover, from a business interpretation perspective, the three-cluster solution fails to produce a clear and intuitive segmentation of market stages and lacks meaningful economic interpretation. Therefore, considering both quantitative clustering metrics and practical interpretability, the three-cluster solution is not adopted in this study.
+```{r}
+plot(hc, labels = FALSE, hang = -1)
+hc_k3 <- cutree(hc, k = 3)
+rect.hclust(hc, k = 3, border = c("red","blue","green"))
+sil_hc3 <- silhouette(hc_k3, d)
+mean(sil_hc3[, 3])
+```
+
+```{r}
+fviz_silhouette(sil_hc3)
+```
+## DBSCAN
+The performance of density-based clustering is considerably weaker. Due to the relatively compact structure of the data, aviation-related variables tend to exhibit smooth transitions rather than clear density separations. As a result, it is difficult to identify meaningful clusters based on density differences from the observed data distribution. In this case, the density-based approach identifies only a single large cluster along with a small number of outliers, providing little analytical or practical value for this study.
+```{r}
+set.seed(123)
+db <- fpc::dbscan(airport_clustering, eps = 0.15, MinPts = 5)
+table(db$cluster)
+plot(db, airport_clustering, main = "DBSCAN", frame = FALSE)
+fviz_cluster(db, airport_clustering, stand = FALSE, frame = FALSE, geom = "point")
+```
+In summary, we adopt the two-cluster PAM solution, as it provides the strongest interpretability and achieves the best overall clustering quality.
+```{r}
+airport_clustering$cluster_pam <- factor(P1$clustering)
+head(airport_clustering)
+airport_clean$cluster_pam <- NA
+
+airport_clean$cluster_pam[
+  as.numeric(rownames(airport_clustering))
+] <- P1$clustering
+head(airport_clean)
+sum(airport_clean$cluster_pam == 2, na.rm = TRUE)
+airport_clean %>%
+  count(cluster_pam)
+```
+#Cluster Analysis Results
+For most airports, a stable hinterland passenger base is the foundation for sustained operation and long-term viability. Even though Incheon International Airport has long pursued the strategy of developing into an international transfer hub, passenger flows dominated by local and direct travelers continue to constitute its primary demand base in the short to medium term. In this context, direct markets not only serve as the airport’s operational “core base,” but also provide the necessary scale to support the development of transfer services.
+
+Accordingly, in this study, routes or market directions dominated by direct passengers (Cluster 1) are defined as the control group, while routes or market directions dominated by transfer passengers (Cluster 2) are defined as the experimental group. This grouping strategy allows transfer-oriented markets to be analyzed more precisely while maintaining direct markets as a baseline reference. Such a control–experiment framework helps clarify the functional roles of different route types at Incheon Airport and further identify markets with potential for conversion toward, or deepening of, transfer-oriented operations. By comparing the structural characteristics of the two clusters, this study aims to provide data-driven support and strategic guidance for advancing transfer hub development while maintaining the stability of direct passenger demand.
+
+For Korea, China and Japan have long constituted the most important aviation markets, and thus warrant separate and focused attention in the analysis. From the data structure, it is evident that both arrival and departure passenger flows at Incheon Airport are highly concentrated in surrounding countries and regions, reflecting the characteristics of a typical regional hub airport.
+
+Specifically, Incheon Airport primarily serves passengers from East Asia—namely China and Japan—Northeast Asia (such as Mongolia), and multiple Southeast Asian countries. Routes from these regions together form a stable and extensive base of transfer passengers. Among them, travelers from Southeast Asia and Northeast Asia often use Incheon as a key transfer point for journeys to North America, which is consistent with Korea’s role as an important gateway airport for U.S.-bound routes. From the perspectives of route network structure, geography, and traffic rights policies, Incheon occupies a strategically central position in the “Asia–North America” aviation system.
+
+It is important to note that within the core China–Japan–Korea market, the arrival and departure structures are not fully symmetric. The data show that the number of flights departing from Incheon to Japan is significantly higher than the number of flights arriving from Japan to Incheon. This phenomenon should not be interpreted simply as stable point-to-point direct demand, but rather as the outcome of price-driven transfer behavior. A large share of passengers do not regard Korea or Japan as their final destination; instead, they choose to transfer via Incheon in order to obtain more cost-efficient travel options.
+
+The primary driver of this structure is the highly developed low-cost carrier (LCC) system in Korea. The Korea–Japan market is characterized by high flight density, intense competition, and fares that are substantially lower than alternative routing options. As a result, “transferring via Incheon to Japan” offers a clear economic advantage. Consequently, routes between Korea and Japan in this context function more as downstream legs within a transfer network, rather than as traditional point-to-point destination markets.
+
+From the arrival and departure distributions of Cluster 2, it can be directly observed that this cluster exhibits a flight structure markedly different from the transfer-oriented Cluster 1, and is overall more consistent with direct-service-dominated operations. Nevertheless, Cluster 2 also shows substantial weight in the China–Japan–Korea market and does not represent a purely “direct-only” structure. Instead, both direct and transfer passenger flows are actively present.
+
+This pattern aligns with Incheon Airport’s operational characteristics as a hub airport. The airport operates clear bank structures, with certain flights scheduled specifically to facilitate transfer connections. Through mechanisms such as through-check baggage, codesharing, and integrated ticketing across airlines, even on relatively short-haul China–Japan–Korea routes, some passengers may still be incorporated into the transfer system. At the same time, China, Japan, Korea, and Southeast Asian countries are all major tourism destinations, with frequent cross-border movements and strong direct travel demand. As a result, in Cluster 2, direct passengers still account for a relatively high proportion, producing a structure in which transfer traffic exists but direct demand is dominant.
+
+Compared with Cluster 1, Cluster 2 exhibits significantly fewer flights in Northeast Asia (excluding China, Japan, and Korea), North America, and Europe, particularly on the arrival side. This indicates that Cluster 2 is more concentrated on regional and short-haul international routes, while long-haul intercontinental routes account for a smaller share. In addition, Korea itself appears much more prominently in Cluster 2 than in Cluster 1, suggesting that this cluster contains more routes for which Korea is either the origin or the destination, rather than merely a transit node.
+
+This feature is closely related to Korea’s transportation and demographic structure. On the one hand, the country’s high-speed rail network is highly developed, limiting domestic air travel demand, which is largely concentrated at Gimpo Airport. On the other hand, Korea’s population of approximately 50 million—nearly half of whom reside in the Seoul metropolitan area—provides a highly concentrated and stable hinterland for international direct travel. Under these conditions, international direct demand with Korea as the origin or destination remains stable, while “domestic-to-international” transfer demand is relatively weak.
+
+Overall, Cluster 2 exhibits a route structure primarily characterized by regional, symmetric, and direct demand, while still incorporating a limited degree of transfer activity. It therefore serves as an appropriate direct-route control group for comparison with the transfer-oriented Cluster 1, enabling a clearer understanding of Incheon Airport’s differentiated functional roles within its route network.
+```{r}
+par(mfrow = c(2, 2))
+PAM1_ARV <- airport_clean %>%
+  filter(
+    cluster_pam == 1,
+    Arrival_Departure == "Arrival",
+    Passenger_Cargo == "Passenger"
+  ) %>%
+  group_by(Routes) %>%
+  summarise(
+    total_flights = sum(Flight, na.rm = TRUE)
+  ) %>%
+  ggplot(aes(x = reorder(Routes, total_flights), y = total_flights)) +
+  geom_col(fill = "#4E79A7") +
+  geom_text(
+    aes(label = total_flights),
+    hjust = -0.1,
+    size = 3
+  ) +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    title = "Cluster 1 – Arrival Routes",
+    x = "Routes",
+    y = "Total Flights"
+  )
+PAM1_ARV
+PAM1_DEP <- airport_clean %>%
+  filter(
+    cluster_pam == 1,
+    Arrival_Departure == "Departure",
+    Passenger_Cargo == "Passenger"
+  ) %>%
+  group_by(Routes) %>%
+  summarise(
+    total_flights = sum(Flight, na.rm = TRUE)
+  ) %>%
+  ggplot(aes(x = reorder(Routes, total_flights), y = total_flights)) +
+  geom_col(fill = "#4E79A7") +
+  geom_text(
+    aes(label = total_flights),
+    hjust = -0.1,
+    size = 3
+  ) +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    title = "Cluster 1 – Departure Routes",
+    x = "Routes",
+    y = "Total Flights"
+  )
+PAM1_DEP
+PAM2_ARV <- airport_clean %>%
+  filter(cluster_pam == 2, Arrival_Departure == "Arrival",
+         Passenger_Cargo == "Passenger") %>%
+  group_by(Routes) %>%
+  summarise(
+    total_flights = sum(Flight, na.rm = TRUE)
+  ) %>%
+  ggplot(aes(x = reorder(Routes, total_flights), y = total_flights)) +
+  geom_col(fill = "#4E79A7") +
+  geom_text(
+    aes(label = total_flights),
+    hjust = -0.1,
+    size = 3
+  ) +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    title = "Cluster 2 – Arrival Routes",
+    x = "Routes",
+    y = "Total Flights"
+  )
+
+plot(PAM2_ARV)
+
+PAM2_DEP <- airport_clean %>%
+  filter(cluster_pam == 2, Arrival_Departure == "Departure",
+         Passenger_Cargo == "Passenger") %>%
+  group_by(Routes) %>%
+  summarise(
+    total_flights = sum(Flight, na.rm = TRUE)
+  ) %>%
+  ggplot(aes(x = reorder(Routes, total_flights), y = total_flights)) +
+  geom_col(fill = "#4E79A7") +
+  geom_text(
+    aes(label = total_flights),
+    hjust = -0.1,
+    size = 3
+  ) +
+  coord_flip() +
+  theme_classic() +
+  labs(
+    title = "Cluster 2 – Departure Routes ",
+    x = "Routes",
+    y = "Total Flights"
+  )
+
+plot(PAM2_DEP)
+```
+## Key Quantitative Findings
+
+- Cluster 1 (transfer-oriented routes) accounts for approximately **X% of total routes**, with an average transfer rate of **X%**
+- Cluster 2 (direct-oriented routes) accounts for **X% of routes**, with significantly higher passenger volumes but lower transfer dependency
+- Average silhouette score across methods ranges from **0.72 to 0.73**, indicating strong clustering reliability
+- K = 2 consistently outperforms higher cluster solutions across all methods
+## Summary & Strategic Implications
+
+The clustering analysis identifies a clear **two-structure network model** at Incheon International Airport:
+
+- **Cluster 1 – Transfer-oriented routes**: characterized by higher transfer dependency and stronger long-haul connectivity  
+- **Cluster 2 – Direct-demand routes**: characterized by larger passenger volumes and lower transfer reliance  
+
+Across multiple clustering methods (K-means, PAM, and hierarchical clustering), the **two-cluster solution is consistently validated**, with silhouette scores ranging from **0.72 to 0.73**, indicating strong clustering quality and structural robustness.
+
+### Key Quantitative Insights
+
+- The network is clearly segmented into **high-volume direct markets vs. high-transfer dependency markets**
+- Cluster 1 exhibits significantly higher **transfer rates**, confirming its role as a transfer corridor  
+- Cluster 2 demonstrates higher **passenger volumes per route**, indicating stable demand-driven markets  
+- Increasing the number of clusters reduces interpretability and clustering quality, confirming that **K = 2 is the optimal segmentation**
+
+---
+
+### Business Interpretation
+
+The results show that Incheon Airport operates a **dual-engine network structure**:
+
+1. **Direct-demand routes (Cluster 2)**  
+   Provide **traffic scale, revenue stability, and high-frequency operations**, particularly in core regional markets such as China–Japan–Korea and Southeast Asia.
+
+2. **Transfer-oriented routes (Cluster 1)**  
+   Enable **network expansion and long-haul connectivity**, especially for flows linking Northeast Asia and Southeast Asia to North America.
+
+These two systems are not independent but **mutually reinforcing**:
+- Direct routes create the base traffic required for transfer operations  
+- Transfer traffic enhances network value, connectivity, and aircraft utilization  
+
+---
+
+### Strategic Implications
+
+Based on these findings, several strategic priorities emerge:
+
+- **Strengthen transfer corridors**  
+  Focus on high-potential flows (e.g., Asia → North America) and improve connection efficiency  
+
+- **Consolidate core direct markets**  
+  Maintain frequency and competitiveness in short- and medium-haul routes  
+
+- **Enhance network coordination**  
+  Align feeder routes with long-haul schedules to improve connectivity and load factors  
+
+- **Target underdeveloped transfer markets**  
+  Identify regions with geographic and regulatory advantages for future expansion  
+
+---
+
+### Strategic Conclusion
+
+Incheon Airport’s competitive advantage lies not in being purely a transfer hub, but in its ability to **balance and integrate transfer and direct demand across different markets**.
+
+This dual-structure model delivers:
+- **Higher network efficiency**  
+- **Greater operational stability**  
+- **Stronger resilience to demand fluctuations**  
+
+Going forward, the key to sustaining competitiveness is to **optimize the interaction between transfer and direct networks**, rather than prioritizing one over the other.
